@@ -1,0 +1,5 @@
+{"t":0,"enabled":true,"v_ego_mps":22.352,"a_ego_mps2":0,"requested_mps":22.352,"cluster_set_mps":22.352,"speed_limit_valid":true,"source":"cruise"}
+{"t":0.5,"enabled":true,"v_ego_mps":22,"a_ego_mps2":-3,"requested_mps":13.4112,"cluster_set_mps":22.352,"planned_accel_mps2":-0.2,"speed_limit_valid":true,"source":"sccVision"}
+{"t":1.5,"enabled":true,"v_ego_mps":20,"a_ego_mps2":-2.5,"requested_mps":13.4112,"cluster_set_mps":21,"speed_limit_valid":true,"source":"sccVision"}
+{"t":2.5,"enabled":true,"v_ego_mps":18,"a_ego_mps2":-2,"requested_mps":13.4112,"cluster_set_mps":20,"speed_limit_valid":true,"source":"sccVision"}
+{"t":3.5,"enabled":true,"v_ego_mps":16,"a_ego_mps2":-1,"requested_mps":13.4112,"cluster_set_mps":18,"speed_limit_valid":true,"source":"sccVision"}
