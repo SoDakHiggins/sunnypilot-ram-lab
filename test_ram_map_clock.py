@@ -18,19 +18,23 @@ EPOCH_NOW = 1_794_854_400.0
 MAX_AGE = 10.0
 
 
-def resolver_methods():
+def resolver_methods(baseline=None, wall_time=EPOCH_NOW, monotonic_time=5000.0):
+  baseline = os.getenv('RAM_RESOLVER_BASELINE') == '1' if baseline is None else baseline
   source = subprocess.check_output(['git', 'show', f'{BASELINE}:{PATH}'], cwd=ROOT, text=True) \
-    if os.getenv('RAM_RESOLVER_BASELINE') == '1' else (ROOT / PATH).read_text()
-  cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == 'SpeedLimitResolver')
+    if baseline else (ROOT / PATH).read_text()
+  tree = ast.parse(source)
+  cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'SpeedLimitResolver')
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and
              n.name in ('_process_map_data', '_calculate_map_data_limits')]
   assert len(methods) == 2
   module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0),
                            ast.ClassDef(name='ResolverUnderTest', bases=[], keywords=[], body=methods, decorator_list=[])],
                       type_ignores=[])
-  namespace = {'time': SimpleNamespace(time=lambda: EPOCH_NOW, monotonic=lambda: 5000.0),
+  tolerance = next((ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == 'GPS_FUTURE_TOLERANCE' for t in n.targets)), 0.)
+  namespace = {'time': SimpleNamespace(time=lambda: wall_time, monotonic=lambda: monotonic_time),
                'LIMIT_MAX_MAP_DATA_AGE': MAX_AGE, 'LIMIT_ADAPT_ACC': -1.,
-               'SpeedLimitSource': SimpleNamespace(map=2)}
+               'SpeedLimitSource': SimpleNamespace(map=2), 'GPS_FUTURE_TOLERANCE': tolerance}
   exec(compile(ast.fix_missing_locations(module), PATH, 'exec'), namespace)
   obj = namespace['ResolverUnderTest']()
   obj._gps_location_service = 'gpsLocation'
@@ -61,6 +65,27 @@ class MapClockTests(unittest.TestCase):
     resolver = resolver_methods()
     resolver._process_map_data(messages(-30))
     self.assertEqual(resolver.limit_solutions[2], 0.)
+
+  def test_small_future_skew_is_accepted(self):
+    resolver = resolver_methods()
+    resolver._process_map_data(messages(-.008, ahead_distance=1000))
+    self.assertEqual(resolver.limit_solutions[2], 20.)
+
+  def test_future_tolerance_boundary_is_accepted(self):
+    resolver = resolver_methods()
+    resolver._process_map_data(messages(-1., ahead_distance=1000))
+    self.assertEqual(resolver.limit_solutions[2], 20.)
+
+  def test_excess_future_skew_is_rejected(self):
+    resolver = resolver_methods()
+    resolver._process_map_data(messages(-1.1))
+    self.assertEqual(resolver.limit_solutions[2], 0.)
+
+  def test_small_future_skew_never_creates_negative_travel(self):
+    resolver = resolver_methods()
+    resolver._process_map_data(messages(-.008, ahead_distance=50))
+    self.assertEqual(resolver.limit_solutions[2], 10.)
+    self.assertAlmostEqual(resolver.distance_solutions[2], 50.)
 
   def test_zero_timestamp_rejects_map_limit(self):
     resolver = resolver_methods()

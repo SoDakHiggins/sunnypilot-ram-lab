@@ -23,7 +23,10 @@ def validate(sample, previous_t=None):
       continue
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
       raise ValueError(f'{key} must be a finite number')
-    if key.endswith('_mps') and not 0 <= value <= 80:
+    # Estimated vehicle speed is signed and can be slightly negative near rest.
+    # Cruise targets/limits still reject negative sentinel values.
+    minimum = -80 if key == 'v_ego_mps' else 0
+    if key.endswith('_mps') and not minimum <= value <= 80:
       raise ValueError(f'{key} is outside the accepted input range; check units/sentinels')
   if sample['t'] < 0 or (previous_t is not None and sample['t'] <= previous_t):
     raise ValueError('Sample times must be nonnegative and strictly increasing')
