@@ -1,9 +1,10 @@
-# Ram cruise development lab — phase 1
+# Ram cruise development lab — candidate map-clock correction
 
-This branch adds an offline trace reviewer, synthetic examples, and regression checks.
-It does not modify steering, acceleration, braking, CAN safety, driver monitoring,
-startup, or software-update configuration. Do not install this branch on a comma.
-There is no validated driving fix or installation package in this phase.
+This review branch contains the offline trace reviewer plus a candidate correction
+to GPS timestamp handling in the map speed-limit resolver. That correction changes
+which map targets can reach speed planning. It has not been installed on a comma.
+Do not install this branch: isolated source tests are not full-stack validation.
+No validated driving fix or installation package is provided.
 
 ## How this fits together
 
@@ -12,6 +13,62 @@ of sunnypilot. Sunnylink is the dashboard for an installed device; it does not
 automatically deploy commits from this repository. A future device build would
 need a deliberate installation path, backup, rollback procedure and validation.
 No device installation, update, remote-access change or setting change was made.
+
+## First reproducible source issue
+
+The installed resolver subtracts `gps_data.unixTimestampMillis` (Unix calendar
+time) from `time.monotonic()` (a clock with an unrelated origin). With normal
+Unix timestamps this produces a large negative age, so an old GPS fix can pass
+the freshness check. The same mismatch in distance calculation can put an
+upcoming limit at an unrealistically large distance instead of anticipating it.
+`system/ubloxd/ubloxd.py` assigns this GPS field from UTC, confirming its clock
+domain. This is a source-level finding, not a diagnosis of the reported incident.
+
+The candidate uses Unix time for both calculations, rejects negative/future ages,
+and prevents negative travelled distance if the clock shifts between calculations.
+It does not change the desired deceleration, curve-speed thresholds, retained
+last-valid-limit behavior, cruise engagement or CAN commands.
+
+### Validation performed
+
+| Check | Installed baseline | Candidate |
+| --- | --- | --- |
+| Fresh GPS accepted | Pass | Pass |
+| GPS older than 10 seconds rejected | Fail | Pass |
+| Future GPS rejected | Fail | Pass |
+| Missing/zero timestamp rejected | Pass | Pass |
+| Exactly 10-second age accepted | Pass | Pass |
+| Just over 10-second age rejected | Fail | Pass |
+| Two-second fix age updates distance correctly | Fail | Pass |
+| Passed waypoint distance clamps to zero | Fail | Pass |
+
+All 25 isolated unit checks pass: 8 map-clock checks, 8 existing ICBM behavior
+checks and 9 trace-reviewer checks. Baseline runs intentionally retain the five
+map-clock failures to demonstrate that the tests detect the original problem.
+The source-method harness executes the actual method bodies with synthetic
+messages and injected clocks; generated Cap'n Proto and full runtime dependencies
+are unavailable here. The ICBM harness uses enum/message stand-ins. There has been
+no vehicle simulation, full upstream-suite run, hardware test or road test.
+
+```sh
+python3 -m unittest test_ram_map_clock.py test_ram_icbm_source.py test_ram_cruise_review.py -v
+RAM_RESOLVER_BASELINE=1 python3 -m unittest test_ram_map_clock.py -v
+```
+
+### What remains unresolved
+
+- Whether this clock mismatch contributed to the actual 55-mph selection.
+- Whether that selection came from a map value, retained limit, or factory resume.
+- Last-valid speed limits may still be retained after current input becomes invalid;
+  this candidate deliberately does not redesign that behavior.
+- ICBM consumes the target speed, not the planner's acceleration request. The
+  eight source checks confirm this and manual-button/cancel/override behavior,
+  but they cannot establish real Ram braking smoothness or CAN timing.
+- A stale GPS fix and an outdated map are separate issues; this correction does
+  not prove that the map data itself is current or correct.
+- The installed wall clock must be checked against GPS during actual-log replay.
+  Rejecting future GPS ages is conservative input rejection, but behavior during
+  device clock adjustment must be evaluated before any deployment.
 
 ## Baseline
 
