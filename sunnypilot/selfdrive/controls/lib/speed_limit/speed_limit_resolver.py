@@ -20,6 +20,9 @@ SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 ALL_SOURCES = tuple(SpeedLimitSource.schema.enumerants.values())
 
+# Allow small GPS/system clock skew without accepting substantially future fixes.
+GPS_FUTURE_TOLERANCE = 1.0  # seconds; travelled distance is still clamped at zero
+
 
 class SpeedLimitResolver:
   limit_solutions: dict[custom.LongitudinalPlanSP.SpeedLimit.Source, float]
@@ -123,9 +126,9 @@ class SpeedLimitResolver:
     gps_data = sm[self._gps_location_service]
     map_data = sm['liveMapDataSP']
 
-    # GPS timestamps are Unix time, not time since boot. Reject future fixes too.
+    # GPS timestamps are Unix time, not time since boot.
     gps_fix_age = time.time() - gps_data.unixTimestampMillis * 1e-3
-    if not 0. <= gps_fix_age <= LIMIT_MAX_MAP_DATA_AGE:
+    if not -GPS_FUTURE_TOLERANCE <= gps_fix_age <= LIMIT_MAX_MAP_DATA_AGE:
       return
 
     speed_limit = map_data.speedLimit if map_data.speedLimitValid else 0.
