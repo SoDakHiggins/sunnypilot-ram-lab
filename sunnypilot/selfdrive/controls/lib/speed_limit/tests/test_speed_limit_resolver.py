@@ -46,7 +46,7 @@ def setup_sm_mock(mocker: MockerFixture):
     'speedLimitAheadDistance': 0.,
   }, mocker)
   gps_data = create_mock({
-    'unixTimestampMillis': time.monotonic() * 1e3,
+    'unixTimestampMillis': time.time() * 1e3,
   }, mocker)
   sm_mock = mocker.MagicMock()
   sm_mock.__getitem__.side_effect = lambda key: {
@@ -138,7 +138,51 @@ class TestSpeedLimitResolverValidation:
     resolver = resolver_class()
     resolver.policy = policy
     sm_mock = mocker.MagicMock()
-    sm_mock['gpsLocation'].unixTimestampMillis = (time.monotonic() - 2 * LIMIT_MAX_MAP_DATA_AGE) * 1e3
+    sm_mock['gpsLocation'].unixTimestampMillis = (time.time() - 2 * LIMIT_MAX_MAP_DATA_AGE) * 1e3
     resolver._get_from_map_data(sm_mock)
     assert resolver.limit_solutions[SpeedLimitSource.map] == 0.
     assert resolver.distance_solutions[SpeedLimitSource.map] == 0.
+
+  @pytest.mark.parametrize("age, accepted", [
+    (0., True),
+    (LIMIT_MAX_MAP_DATA_AGE, True),
+    (LIMIT_MAX_MAP_DATA_AGE + .1, False),
+    (-.008, True),
+    (-1., True),
+    (-1.1, False),
+    (30., False),
+    (1_794_854_400., False),  # zero GPS timestamp
+  ])
+  def test_map_fix_uses_unix_clock(self, resolver_class, age, accepted, mocker: MockerFixture):
+    now = 1_794_854_400.
+    mocker.patch('time.time', return_value=now)
+    mocker.patch('time.monotonic', return_value=5000.)
+    resolver = resolver_class()
+    resolver.v_ego = 20.
+    sm = setup_sm_mock(mocker)
+    sm['gpsLocation'].unixTimestampMillis = int((now - age) * 1000)
+    sm['liveMapDataSP'].speedLimit = 20.
+    resolver._get_from_map_data(sm)
+    assert resolver.limit_solutions[SpeedLimitSource.map] == (20. if accepted else 0.)
+
+  @pytest.mark.parametrize("age, ahead_distance, expected_distance", [
+    (2., 50., 10.),
+    (2., 20., 0.),
+    (-.008, 50., 50.),
+  ])
+  def test_map_distance_uses_elapsed_seconds(self, resolver_class, age, ahead_distance, expected_distance,
+                                           mocker: MockerFixture):
+    now = 1_794_854_400.
+    mocker.patch('time.time', return_value=now)
+    mocker.patch('time.monotonic', return_value=5000.)
+    resolver = resolver_class()
+    resolver.v_ego = 20.
+    sm = setup_sm_mock(mocker)
+    sm['gpsLocation'].unixTimestampMillis = int((now - age) * 1000)
+    sm['liveMapDataSP'].speedLimit = 20.
+    sm['liveMapDataSP'].speedLimitAhead = 10.
+    sm['liveMapDataSP'].speedLimitAheadValid = True
+    sm['liveMapDataSP'].speedLimitAheadDistance = ahead_distance
+    resolver._get_from_map_data(sm)
+    assert resolver.limit_solutions[SpeedLimitSource.map] == 10.
+    assert resolver.distance_solutions[SpeedLimitSource.map] == pytest.approx(expected_distance)
