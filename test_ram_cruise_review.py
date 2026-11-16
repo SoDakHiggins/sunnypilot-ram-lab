@@ -50,6 +50,12 @@ class ReviewTests(unittest.TestCase):
   def test_disabled_data_is_not_a_driving_event(self):
     self.assertEqual(codes([sample(enabled=False, a_ego_mps2=-4)]), [])
 
+  def test_signed_vehicle_speed_does_not_allow_negative_cruise_targets(self):
+    self.assertEqual(codes([sample(enabled=False, v_ego_mps=-.03)]), [])
+    for key in ('requested_mps', 'cluster_set_mps', 'driver_ceiling_mps'):
+      with self.assertRaises(ValueError):
+        analyze([sample(**{key: -1})])
+
   def test_bad_units_nonfinite_and_timestamps_rejected(self):
     for bad in (sample(v_ego_mps=math.nan), sample(requested_mps=255), sample(t=-1), sample(enabled='true')):
       with self.assertRaises(ValueError):
